@@ -19,57 +19,96 @@ if ($_POST && isset($_POST['make_deposit'])) {
         $amount = (float)$_POST['amount'];
         $phone = sanitize($_POST['phone']);
         
+        // Remove any non-numeric characters from phone
+        $phone = preg_replace('/[^0-9]/', '', $phone);
+        
+        // Format phone number to 254XXXXXXXXX
+        if (strlen($phone) == 10 && substr($phone, 0, 1) === '0') {
+            // 0758256440 -> 254758256440
+            $phone = '254' . substr($phone, 1);
+        } elseif (strlen($phone) == 9) {
+            // 758256440 -> 254758256440
+            $phone = '254' . $phone;
+        } elseif (strlen($phone) == 13 && substr($phone, 0, 4) === '+254') {
+            // +254758256440 -> 254758256440
+            $phone = substr($phone, 1);
+        }
+        
         // Validation
         if ($amount < 100) {
             $error = 'Minimum deposit amount is KSh 100.';
         } elseif ($amount > 1000000) {
             $error = 'Maximum deposit amount is KSh 1,000,000.';
-        } elseif (!preg_match('/^254[0-9]{9}$/', $phone)) {
-            $error = 'Please enter a valid M-Pesa phone number (254XXXXXXXXX).';
+        } elseif (strlen($phone) !== 12 || substr($phone, 0, 3) !== '254') {
+            $error = 'Please enter a valid M-Pesa phone number (e.g., 0712345678 or 254712345678).';
         } else {
-            try {
-                $db->beginTransaction();
-                
-                // Create pending deposit transaction FIRST
-                $stmt = $db->prepare("
-                    INSERT INTO transactions (user_id, type, amount, phone_number, status, description) 
-                    VALUES (?, 'deposit', ?, ?, 'pending', 'M-Pesa deposit request')
-                ");
-                $stmt->execute([$user_id, $amount, $phone]);
-                $transaction_id = $db->lastInsertId();
-                
-                // NOW initiate M-Pesa STK Push
-                require_once '../config/mpesa.php';
-                $mpesa_result = initiateMpesaPayment($phone, $amount, $transaction_id, 'Ultra Harvest Deposit');
-                
-                if ($mpesa_result['success']) {
-                    // Store the checkout request ID for callback matching
+            // Additional validation for Kenyan mobile prefixes
+            // Valid prefixes: 070-079 (Safaricom), 110-119 (Airtel), 101-109 (Telkom)
+            $digit4 = substr($phone, 3, 1); // 4th digit after 254
+            $digit5 = substr($phone, 4, 1); // 5th digit after 254
+            
+            $is_valid = false;
+            
+            // Check for Safaricom (070x-079x)
+            if ($digit4 === '7' && in_array($digit5, ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])) {
+                $is_valid = true;
+            }
+            // Check for Airtel (110x-119x)
+            elseif ($digit4 === '1' && $digit5 === '1') {
+                $is_valid = true;
+            }
+            // Check for Telkom (10xx)
+            elseif ($digit4 === '1' && $digit5 === '0') {
+                $is_valid = true;
+            }
+            
+            if (!$is_valid) {
+                $error = 'Please enter a valid Kenyan mobile number (Safaricom: 07xx, Airtel: 11xx, Telkom: 10xx).';
+            } else {
+                try {
+                    $db->beginTransaction();
+                    
+                    // Create pending deposit transaction FIRST
                     $stmt = $db->prepare("
-                        UPDATE transactions 
-                        SET mpesa_request_id = ? 
-                        WHERE id = ?
+                        INSERT INTO transactions (user_id, type, amount, phone_number, status, description) 
+                        VALUES (?, 'deposit', ?, ?, 'pending', 'M-Pesa deposit request')
                     ");
-                    $stmt->execute([$mpesa_result['checkout_request_id'], $transaction_id]);
+                    $stmt->execute([$user_id, $amount, $phone]);
+                    $transaction_id = $db->lastInsertId();
                     
-                    $db->commit();
-                    $success = 'M-Pesa payment request sent to your phone (' . $phone . '). Please enter your M-Pesa PIN to complete the payment.';
+                    // NOW initiate M-Pesa STK Push
+                    require_once '../config/mpesa.php';
+                    $mpesa_result = initiateMpesaPayment($phone, $amount, $transaction_id, 'UltraHarvest');
                     
-                    // Send notification
-                    sendNotification($user_id, 'Deposit Initiated', "M-Pesa payment request for " . formatMoney($amount) . " sent to your phone.", 'info');
-                } else {
-                    $db->rollBack();
-                    $error = $mpesa_result['message'] ?? 'Failed to initiate M-Pesa payment. Please try again.';
+                    if ($mpesa_result['success']) {
+                        // Store the checkout request ID for callback matching
+                        $stmt = $db->prepare("
+                            UPDATE transactions 
+                            SET mpesa_request_id = ? 
+                            WHERE id = ?
+                        ");
+                        $stmt->execute([$mpesa_result['checkout_request_id'], $transaction_id]);
+                        
+                        $db->commit();
+                        $success = 'M-Pesa payment request sent to ' . $phone . '. Please enter your M-Pesa PIN to complete the payment.';
+                        
+                        // Send notification
+                        sendNotification($user_id, 'Deposit Initiated', "M-Pesa payment request for " . formatMoney($amount) . " sent to your phone.", 'info');
+                    } else {
+                        $db->rollBack();
+                        $error = $mpesa_result['message'] ?? 'Failed to initiate M-Pesa payment. Please try again.';
+                        
+                        // Log the error for debugging
+                        error_log("M-Pesa STK Push Failed - User: $user_id, Amount: $amount, Phone: $phone, Error: " . ($mpesa_result['message'] ?? 'Unknown error'));
+                    }
                     
-                    // Log the error for debugging
-                    error_log("M-Pesa STK Push Failed - User: $user_id, Amount: $amount, Phone: $phone, Error: " . ($mpesa_result['message'] ?? 'Unknown error'));
+                } catch (Exception $e) {
+                    if ($db->inTransaction()) {
+                        $db->rollBack();
+                    }
+                    $error = 'Failed to process deposit request. Please try again.';
+                    error_log("Deposit error: " . $e->getMessage());
                 }
-                
-            } catch (Exception $e) {
-                if ($db->inTransaction()) {
-                    $db->rollBack();
-                }
-                $error = 'Failed to process deposit request. Please try again.';
-                error_log("Deposit error: " . $e->getMessage());
             }
         }
     }
@@ -256,25 +295,25 @@ $recent_deposits = $stmt->fetchAll();
                         </div>
 
                         <!-- Phone Number -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-300 mb-2">
-                                <i class="fas fa-phone mr-2"></i>M-Pesa Phone Number
-                            </label>
-                            <input 
-                                type="tel" 
-                                name="phone" 
-                                id="phone"
-                                value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>"
-                                class="w-full px-4 py-4 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-emerald-500 focus:outline-none"
-                                placeholder="254XXXXXXXXX"
-                                pattern="254[0-9]{9}"
-                                required
-                            >
-                            <p class="text-sm text-gray-500 mt-2">
-                                <i class="fas fa-info-circle mr-1"></i>
-                                Enter your M-Pesa registered phone number
-                            </p>
-                        </div>
+                        <!-- Phone Number -->
+<div>
+    <label class="block text-sm font-medium text-gray-300 mb-2">
+        <i class="fas fa-phone mr-2"></i>M-Pesa Phone Number
+    </label>
+    <input 
+        type="tel" 
+        name="phone" 
+        id="phone"
+        value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>"
+        class="w-full px-4 py-4 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-emerald-500 focus:outline-none"
+        placeholder="0712345678 or 254712345678"
+        required
+    >
+    <p class="text-sm text-gray-500 mt-2">
+        <i class="fas fa-info-circle mr-1"></i>
+        Enter your M-Pesa registered phone number (e.g., 0712345678)
+    </p>
+</div>
 
                         <!-- Deposit Summary -->
                         <div class="bg-gray-800/50 rounded-lg p-6" id="deposit-summary" style="display: none;">
@@ -451,16 +490,13 @@ $recent_deposits = $stmt->fetchAll();
         });
 
         // Phone number formatting
-        document.getElementById('phone').addEventListener('input', function() {
-            let value = this.value.replace(/\D/g, '');
-            if (value.startsWith('0')) {
-                value = '254' + value.substring(1);
-            }
-            if (!value.startsWith('254') && value.length > 0) {
-                value = '254' + value;
-            }
-            this.value = value;
-        });
+        // Phone number formatting - UPDATED
+document.getElementById('phone').addEventListener('input', function() {
+    let value = this.value.replace(/\D/g, ''); // Remove non-digits
+    
+    // Don't auto-format, just clean
+    this.value = value;
+});
 
         // Update deposit summary
         function updateSummary() {
