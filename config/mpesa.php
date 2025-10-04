@@ -292,44 +292,52 @@ class MpesaIntegration {
     }
     
     /**
-     * Format phone number to M-Pesa standard (254XXXXXXXXX)
-     */
-    private function formatPhoneNumber($phone) {
-        // Remove any non-numeric characters
-        $phone = preg_replace('/[^0-9]/', '', $phone);
-        
-        // Handle different formats
-        if (strlen($phone) == 10 && substr($phone, 0, 1) === '0') {
-            // 0712345678 -> 254712345678
-            $phone = '254' . substr($phone, 1);
-        } elseif (strlen($phone) == 9 && (substr($phone, 0, 1) === '7' || substr($phone, 0, 1) === '1')) {
-            // 712345678 -> 254712345678
-            $phone = '254' . $phone;
-        } elseif (strlen($phone) == 12 && substr($phone, 0, 3) === '254') {
-            // Already in correct format
-            $phone = $phone;
-        } elseif (strlen($phone) == 13 && substr($phone, 0, 4) === '+254') {
-            // +254712345678 -> 254712345678
-            $phone = substr($phone, 1);
-        }
-        
-        // Validate final format
-        if (strlen($phone) !== 12 || substr($phone, 0, 3) !== '254') {
-            return false;
-        }
-        
-        // Validate Kenyan mobile number prefixes (updated for 2025)
-        $prefix = substr($phone, 3, 2);
-        $valid_prefixes = ['07', '11', '10']; // Covers all Safaricom, Airtel prefixes
-        
-        foreach ($valid_prefixes as $valid) {
-            if (substr($prefix, 0, 2) === $valid) {
-                return $phone;
-            }
-        }
-        
+ * Format phone number to M-Pesa standard (254XXXXXXXXX)
+ */
+private function formatPhoneNumber($phone) {
+    // Remove any non-numeric characters
+    $phone = preg_replace('/[^0-9]/', '', $phone);
+    
+    // Handle different formats
+    if (strlen($phone) == 10 && substr($phone, 0, 1) === '0') {
+        // 0712345678 -> 254712345678
+        $phone = '254' . substr($phone, 1);
+    } elseif (strlen($phone) == 9 && (substr($phone, 0, 1) === '7' || substr($phone, 0, 1) === '1')) {
+        // 712345678 -> 254712345678
+        $phone = '254' . $phone;
+    } elseif (strlen($phone) == 12 && substr($phone, 0, 3) === '254') {
+        // Already in correct format
+        $phone = $phone;
+    } elseif (strlen($phone) == 13 && substr($phone, 0, 4) === '+254') {
+        // +254712345678 -> 254712345678
+        $phone = substr($phone, 1);
+    }
+    
+    // Validate final format
+    if (strlen($phone) !== 12 || substr($phone, 0, 3) !== '254') {
         return false;
     }
+    
+    // Validate Kenyan mobile number prefixes
+    // Valid: 070-079 (Safaricom), 110-119 (Airtel), 100-109 (Telkom)
+    $digit4 = substr($phone, 3, 1); // 4th digit after 254
+    $digit5 = substr($phone, 4, 1); // 5th digit after 254
+    
+    // Check for Safaricom (254 7x xxxx xxxx)
+    if ($digit4 === '7') {
+        return $phone;
+    }
+    // Check for Airtel (254 1 1x xxxx xxxx)
+    elseif ($digit4 === '1' && $digit5 === '1') {
+        return $phone;
+    }
+    // Check for Telkom (254 1 0x xxxx xxxx)
+    elseif ($digit4 === '1' && $digit5 === '0') {
+        return $phone;
+    }
+    
+    return false;
+}
     
     /**
      * Validate M-Pesa configuration
