@@ -1,7 +1,8 @@
 <?php
 /**
- * Fixed M-Pesa Integration Configuration and Functions
+ * M-Pesa Integration Configuration and Functions
  * Ultra Harvest Global - M-Pesa STK Push Integration
+ * Production-Ready Version
  */
 
 require_once 'database.php';
@@ -120,7 +121,7 @@ class MpesaIntegration {
             
             $access_token = $this->getAccessToken();
             if (!$access_token) {
-                return ['success' => false, 'message' => 'Failed to authenticate with M-Pesa. Please try again.'];
+                return ['success' => false, 'message' => 'Failed to authenticate with M-Pesa. Please contact support.'];
             }
             
             $url = $this->base_url . '/mpesa/stkpush/v1/processrequest';
@@ -138,13 +139,13 @@ class MpesaIntegration {
                 'Password' => $password_data['password'],
                 'Timestamp' => $password_data['timestamp'],
                 'TransactionType' => 'CustomerPayBillOnline',
-                'Amount' => (int)round($amount), // Ensure it's an integer
+                'Amount' => (int)round($amount),
                 'PartyA' => $phone_number,
                 'PartyB' => $this->business_shortcode,
                 'PhoneNumber' => $phone_number,
                 'CallBackURL' => $this->callback_url,
-                'AccountReference' => substr($account_reference, 0, 13), // Max 13 characters
-                'TransactionDesc' => substr($transaction_desc, 0, 13) // Max 13 characters
+                'AccountReference' => substr($account_reference, 0, 12),
+                'TransactionDesc' => substr($transaction_desc, 0, 13)
             ];
             
             $headers = [
@@ -191,7 +192,7 @@ class MpesaIntegration {
                         'success' => true,
                         'checkout_request_id' => $result['CheckoutRequestID'],
                         'merchant_request_id' => $result['MerchantRequestID'],
-                        'message' => $result['ResponseDescription'] ?? 'Payment request sent successfully. Please complete on your phone.'
+                        'message' => $result['ResponseDescription'] ?? 'Payment request sent successfully. Please check your phone.'
                     ];
                 } else {
                     $error_message = $result['ResponseDescription'] ?? $result['errorMessage'] ?? 'Payment request failed';
@@ -203,10 +204,13 @@ class MpesaIntegration {
                                 $error_message = 'Invalid account number. Please check your details.';
                                 break;
                             case '500.001.1001':
-                                $error_message = 'Unable to process request. Please try again.';
+                                $error_message = 'Unable to process request. Please try again in a moment.';
                                 break;
                             case '400.008.02':
                                 $error_message = 'Invalid phone number. Please check and try again.';
+                                break;
+                            case '401':
+                                $error_message = 'Authentication failed. Please contact support.';
                                 break;
                         }
                     }
@@ -314,15 +318,17 @@ class MpesaIntegration {
             return false;
         }
         
-        // Validate Kenyan mobile number prefixes
-        $prefix = substr($phone, 3, 3);
-        $valid_prefixes = ['070', '071', '072', '110', '111', '112', '113', '114', '115'];
+        // Validate Kenyan mobile number prefixes (updated for 2025)
+        $prefix = substr($phone, 3, 2);
+        $valid_prefixes = ['07', '11', '10']; // Covers all Safaricom, Airtel prefixes
         
-        if (!in_array($prefix, $valid_prefixes)) {
-            return false;
+        foreach ($valid_prefixes as $valid) {
+            if (substr($prefix, 0, 2) === $valid) {
+                return $phone;
+            }
         }
         
-        return $phone;
+        return false;
     }
     
     /**
@@ -375,7 +381,8 @@ class MpesaIntegration {
                 return [
                     'success' => true, 
                     'message' => 'Connection successful. Token obtained.',
-                    'environment' => $this->environment
+                    'environment' => $this->environment,
+                    'base_url' => $this->base_url
                 ];
             } else {
                 return [
@@ -417,7 +424,7 @@ class MpesaIntegration {
     private function logError($message) {
         $log_entry = date('Y-m-d H:i:s') . " - M-Pesa Error: $message" . PHP_EOL;
         error_log($log_entry, 3, dirname(__DIR__) . '/logs/mpesa_errors.log');
-        error_log("M-Pesa Error: " . $message); // Also log to system error log
+        error_log("M-Pesa Error: " . $message);
     }
     
     /**
@@ -445,7 +452,7 @@ function initiateMpesaPayment($phone, $amount, $transaction_id, $description = '
             ];
         }
         
-        // Create account reference (max 13 characters)
+        // Create account reference (max 12 characters)
         $account_reference = "UH" . str_pad($transaction_id, 6, '0', STR_PAD_LEFT);
         
         // Ensure description is within limits (max 13 characters)
@@ -454,11 +461,6 @@ function initiateMpesaPayment($phone, $amount, $transaction_id, $description = '
         $result = $mpesa->stkPush($phone, $amount, $account_reference, $short_description);
         
         if ($result['success']) {
-            // Store the checkout request ID for later verification
-            global $db;
-            $stmt = $db->prepare("UPDATE transactions SET mpesa_request_id = ?, phone_number = ?, updated_at = NOW() WHERE id = ?");
-            $stmt->execute([$result['checkout_request_id'], $phone, $transaction_id]);
-            
             // Log the transaction attempt
             error_log("M-Pesa STK Push initiated: Transaction ID $transaction_id, Amount: $amount, Phone: $phone, CheckoutRequestID: {$result['checkout_request_id']}");
         } else {
@@ -497,41 +499,6 @@ function validatePhoneNumber($phone) {
     }
     
     return false;
-}
-
-/**
- * Get M-Pesa transaction statement
- */
-function getMpesaStatement($start_date, $end_date) {
-    // This would implement C2B Register URL and Transaction Status APIs
-    // For future implementation when needed
-    return [
-        'success' => true,
-        'transactions' => [],
-        'message' => 'Statement retrieval feature coming soon'
-    ];
-}
-
-/**
- * Register M-Pesa URLs (for C2B)
- */
-function registerMpesaUrls() {
-    try {
-        $mpesa = new MpesaIntegration();
-        
-        // This would register confirmation and validation URLs
-        // Implementation depends on whether you want C2B functionality
-        
-        return [
-            'success' => true,
-            'message' => 'URL registration feature available on request'
-        ];
-    } catch (Exception $e) {
-        return [
-            'success' => false,
-            'message' => 'URL registration failed: ' . $e->getMessage()
-        ];
-    }
 }
 
 /**
