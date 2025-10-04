@@ -30,7 +30,7 @@ if ($_POST && isset($_POST['make_deposit'])) {
             try {
                 $db->beginTransaction();
                 
-                // Create pending deposit transaction
+                // Create pending deposit transaction FIRST
                 $stmt = $db->prepare("
                     INSERT INTO transactions (user_id, type, amount, phone_number, status, description) 
                     VALUES (?, 'deposit', ?, ?, 'pending', 'M-Pesa deposit request')
@@ -38,24 +38,36 @@ if ($_POST && isset($_POST['make_deposit'])) {
                 $stmt->execute([$user_id, $amount, $phone]);
                 $transaction_id = $db->lastInsertId();
                 
-                // Here you would integrate with M-Pesa STK Push API
-                // For now, we'll simulate the process
-                
-                $mpesa_result = initiateMpesaPayment($phone, $amount, $transaction_id);
+                // NOW initiate M-Pesa STK Push
+                require_once '../config/mpesa.php';
+                $mpesa_result = initiateMpesaPayment($phone, $amount, $transaction_id, 'Ultra Harvest Deposit');
                 
                 if ($mpesa_result['success']) {
+                    // Store the checkout request ID for callback matching
+                    $stmt = $db->prepare("
+                        UPDATE transactions 
+                        SET mpesa_request_id = ? 
+                        WHERE id = ?
+                    ");
+                    $stmt->execute([$mpesa_result['checkout_request_id'], $transaction_id]);
+                    
                     $db->commit();
-                    $success = 'M-Pesa payment request sent to your phone. Please complete the payment to credit your account.';
+                    $success = 'M-Pesa payment request sent to your phone (' . $phone . '). Please enter your M-Pesa PIN to complete the payment.';
                     
                     // Send notification
                     sendNotification($user_id, 'Deposit Initiated', "M-Pesa payment request for " . formatMoney($amount) . " sent to your phone.", 'info');
                 } else {
                     $db->rollBack();
                     $error = $mpesa_result['message'] ?? 'Failed to initiate M-Pesa payment. Please try again.';
+                    
+                    // Log the error for debugging
+                    error_log("M-Pesa STK Push Failed - User: $user_id, Amount: $amount, Phone: $phone, Error: " . ($mpesa_result['message'] ?? 'Unknown error'));
                 }
                 
             } catch (Exception $e) {
-                $db->rollBack();
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
                 $error = 'Failed to process deposit request. Please try again.';
                 error_log("Deposit error: " . $e->getMessage());
             }
@@ -72,20 +84,7 @@ $stmt = $db->prepare("
 ");
 $stmt->execute([$user_id]);
 $recent_deposits = $stmt->fetchAll();
-
-// Mock M-Pesa function (replace with actual M-Pesa integration)
-function initiateMpesaPayment($phone, $amount, $transaction_id) {
-    // This is a placeholder - implement actual M-Pesa STK Push here
-    // For demo purposes, we'll return success
-    return [
-        'success' => true,
-        'checkout_request_id' => 'ws_CO_' . time() . rand(1000, 9999),
-        'response_code' => '0',
-        'response_description' => 'Success. Request accepted for processing'
-    ];
-}
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
