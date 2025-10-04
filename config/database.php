@@ -256,7 +256,7 @@ function updateDatabaseSchema() {
 }
 
 // Uncomment the line below to run the schema update once
-// updateDatabaseSchema();
+updateDatabaseSchema();
 
 /**
  * Error Reporting for Development
@@ -644,4 +644,5 @@ function getPageSEOData($page_key) {
         return [];
     }
 }
+
 ?>
