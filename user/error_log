@@ -1,0 +1,10 @@
+[18-Sep-2025 14:39:45 UTC] PHP Fatal error:  Uncaught PDOException: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'zurihubc_Ultra Harvest.user_settings' doesn't exist in /home/zurihubc/ultraharvest.zurihub.co.ke/user/settings.php:143
+Stack trace:
+#0 /home/zurihubc/ultraharvest.zurihub.co.ke/user/settings.php(143): PDO->prepare('SELECT * FROM u...')
+#1 {main}
+  thrown in /home/zurihubc/ultraharvest.zurihub.co.ke/user/settings.php on line 143
+[20-Sep-2025 14:00:31 UTC] PHP Warning:  require_once(config/database.php): Failed to open stream: No such file or directory in /home/zurihubc/ultraharvest.zurihub.co.ke/user/help.php on line 2
+[20-Sep-2025 14:00:31 UTC] PHP Fatal error:  Uncaught Error: Failed opening required 'config/database.php' (include_path='.:/opt/cpanel/ea-php83/root/usr/share/pear') in /home/zurihubc/ultraharvest.zurihub.co.ke/user/help.php:2
+Stack trace:
+#0 {main}
+  thrown in /home/zurihubc/ultraharvest.zurihub.co.ke/user/help.php on line 2
