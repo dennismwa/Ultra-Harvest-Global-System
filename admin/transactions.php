@@ -2,6 +2,9 @@
 require_once '../config/database.php';
 requireAdmin();
 
+// Don't output anything before this point
+ob_start(); // Start output buffering to prevent header issues
+
 $error = '';
 $success = '';
 
@@ -294,12 +297,7 @@ try {
     // Use default stats if query fails
 }
 
-// Helper function to format money
-if (!function_exists('formatMoney')) {
-    function formatMoney($amount) {
-        return 'KSh ' . number_format($amount, 2);
-    }
-}
+ob_end_flush(); // End output buffering
 ?>
 
 <!DOCTYPE html>
